@@ -7,8 +7,12 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("fetch-commodities", help="download real metal prices (one-time)")
     gen = commands.add_parser("generate", help="build data/generated/erp.sqlite")
-    gen.add_argument("--seed", type=int, default=None, help="random seed (default: config.SEED)")
-    gen.add_argument("--jobs", type=int, default=3000, help="number of historical quotes")
+    chk = commands.add_parser("check-generator", help="eval: how learnable is the cost data")
+    for sub in (gen, chk):
+        sub.add_argument(
+            "--seed", type=int, default=None, help="random seed (default: config.SEED)"
+        )
+        sub.add_argument("--jobs", type=int, default=3000, help="number of historical quotes")
     args = parser.parse_args()
 
     # Imports live inside each branch so a command only loads what it needs.
@@ -16,8 +20,16 @@ def main() -> None:
         from quote_desk.generate.fetch_commodities import fetch
 
         fetch()
-    elif args.command == "generate":
-        from quote_desk import config
+        return
+
+    from quote_desk import config
+
+    seed = config.SEED if args.seed is None else args.seed
+    if args.command == "generate":
         from quote_desk.generate.synth_erp import generate
 
-        generate(seed=config.SEED if args.seed is None else args.seed, n_jobs=args.jobs)
+        generate(seed=seed, n_jobs=args.jobs)
+    elif args.command == "check-generator":
+        from quote_desk.generate.learnability import check
+
+        check(seed=seed, n_jobs=args.jobs)
