@@ -13,7 +13,10 @@ def main() -> None:
             "--seed", type=int, default=None, help="random seed (default: config.SEED)"
         )
         sub.add_argument("--jobs", type=int, default=3000, help="number of historical quotes")
-    commands.add_parser("clean", help="Foundation: profile, clean and report on the ERP")
+    cln = commands.add_parser("clean", help="Foundation: profile, clean and report on the ERP")
+    cln.add_argument(
+        "--demo", action="store_true", help="clean the unrelated field-service sample instead"
+    )
     args = parser.parse_args()
 
     # Imports live inside each branch so a command only loads what it needs.
@@ -34,13 +37,23 @@ def main() -> None:
 
         check(seed=config.SEED if args.seed is None else args.seed, n_jobs=args.jobs)
     elif args.command == "clean":
-        from quote_desk.foundation.contracts.lakeshore_erp import CONTRACT
-        from quote_desk.foundation.load import load_sqlite
+        from quote_desk.foundation.load import load_csv_folder, load_sqlite
         from quote_desk.foundation.quality_report import build_foundation
 
-        result = build_foundation(
-            load_sqlite(config.ERP_DB), CONTRACT, config.FOUNDATION_DB, config.QUALITY_REPORT
-        )
-        print(f"Wrote {config.FOUNDATION_DB}")
-        print(f"Wrote {config.QUALITY_REPORT}")
+        if args.demo:
+            from quote_desk.foundation.contracts.field_service_demo import CONTRACT
+
+            raw = load_csv_folder(config.ROOT / "data" / "samples" / "field_service")
+            db, report = (
+                config.DATA_DIR / "demo" / "foundation.sqlite",
+                config.DATA_DIR / "demo" / "quality_report.md",
+            )
+        else:
+            from quote_desk.foundation.contracts.lakeshore_erp import CONTRACT
+
+            raw = load_sqlite(config.ERP_DB)
+            db, report = config.FOUNDATION_DB, config.QUALITY_REPORT
+        result = build_foundation(raw, CONTRACT, db, report)
+        print(f"Wrote {db}")
+        print(f"Wrote {report}")
         print(f"Review queue: {len(result.review_queue)} cases")

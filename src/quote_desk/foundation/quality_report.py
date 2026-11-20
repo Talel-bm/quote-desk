@@ -52,6 +52,11 @@ def n(x: int) -> str:
     return f"{x:,}"
 
 
+def count(x: int, singular: str, plural: str | None = None) -> str:
+    """'1 record', '20 records', '1,270 quantities'."""
+    return f"{n(x)} {singular if x == 1 else plural or singular + 's'}"
+
+
 # --- Report sections ----------------------------------------------------------
 def missing_values(raw_profile: dict) -> pd.DataFrame:
     """Columns that have missing values in the raw data (left for the model layer)."""
@@ -90,14 +95,16 @@ def summary_section(contract: Contract, raw: dict, result: Result) -> list[str]:
             f"- **`{name}`:** {n(counts['rows_kept'])} of {n(counts['rows_in'])} rows kept. "
             f"Excluded with a reason: {detail or 'none'}."
         )
+    remapped = int(actions.get("remapped_to_master", 0))
+    converted = int(actions.get("unit_converted", 0))
+    flagged = int(actions.get("flagged_outlier", 0))
     lines += [
-        f"- **Fixed automatically and logged:** {merged} records stored under two keys were "
-        f"merged ({n(int(actions.get('remapped_to_master', 0)))} references repointed to the "
-        f"master); {n(int(actions.get('unit_converted', 0)))} quantities converted to a "
-        "standard unit.",
-        f"- **Flagged, not removed:** {n(int(actions.get('flagged_outlier', 0)))} values are "
-        f"unusual compared with similar records. {len(result.review_queue)} cases are extreme "
-        "or unresolvable and wait in the **review queue** for a person.",
+        f"- **Fixed automatically and logged:** {count(merged, 'record')} stored under a second "
+        f"key merged into its master ({count(remapped, 'reference')} repointed); "
+        f"{count(converted, 'quantity', 'quantities')} converted to a standard unit.",
+        f"- **Flagged, not removed:** {count(flagged, 'value')} unusual compared with similar "
+        f"records. {count(len(result.review_queue), 'case')} extreme or unresolvable, waiting "
+        "in the **review queue** for a person.",
         f"- **Left for the model layer:** missing values in "
         f"{len(missing_values(profile(raw)))} columns are kept as missing, not guessed.",
         "- **Nothing was deleted:** every row is kept, merged into its master (see crosswalk), "
@@ -116,7 +123,7 @@ def safeguards_section() -> list[str]:
                 "A written contract per source: keys, links, types, units, "
                 "which rows count. Every rule is visible in one file.",
             ),  # fmt: skip
-            ("Controlled access", "The ERP is opened read-only; outputs go to a separate file."),
+            ("Controlled access", "The source is opened read-only; outputs go to a separate file."),
             (
                 "Tested calculations",
                 "The engine is unit-tested on small hand-made tables, and "
