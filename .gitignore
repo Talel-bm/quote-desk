@@ -1,0 +1,5 @@
+.env
+.venv/
+data/generated/
+__pycache__/
+SPEC.private.md
