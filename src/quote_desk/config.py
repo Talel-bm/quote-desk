@@ -28,8 +28,8 @@ SEED = 42
 # LLM provider switch: "gemini" or "ollama".
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini").lower()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-4-hydrogen")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
 
 
 def ensure_data_dir() -> Path:
