@@ -4,7 +4,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Early scaffold: `src/quote_desk/__init__.py` only defines a placeholder `main()`, there are no tests yet, and `README.md` is empty. Update this file as real modules are added.
+Step 0 (scaffold) done: empty subpackages `generate/ foundation/ forge/ intake/ workforce/ api/` under `src/quote_desk/` match the build steps in `SPEC.md`. `README.md` is still empty. Update this file as real modules are added.
+
+## Architecture notes
+
+- `src/quote_desk/config.py` is the single source of paths, `SEED`, and LLM settings (`LLM_PROVIDER`, Gemini/Ollama model names, read from `.env`; see `.env.example`). Don't rebuild paths or read env vars elsewhere.
+- Two SQLite databases in `DATA_DIR` (`data/generated/`, overridable with `QUOTEDESK_DATA_DIR`): `erp.sqlite` is the synthetic ERP, rebuilt by `generate/` and treated as read-only after Foundation; `app.sqlite` holds app state (approval inbox, feedback, quotes) so regenerating the ERP never wipes it.
+- Tests use the `tmp_data_dir` fixture in `tests/conftest.py` to redirect `DATA_DIR` to a temp folder.
+
+## Git workflow
+
+Repo is public (github.com/Talel-bm/quote-desk). One branch per SPEC step (`step-N-<name>`), small commits, then `git merge --no-ff` into `main` and push. Never squash-merge (keeps daily commits on the contribution graph) and never force-push. `SPEC.private.md` is git-ignored; don't name the target company in tracked files.
 
 ## Tooling
 
