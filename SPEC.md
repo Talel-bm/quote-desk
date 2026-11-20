@@ -40,8 +40,7 @@ Step 1. Generate (generate/): reproducible (seed), ~3,000 historical jobs.
 
 Step 2. Foundation (foundation/): clean the mess (dedupe parts, drop cancelled
   and quote-only rows from cost history, normalize units, flag outliers) and write
-  a data quality report (rows in, rows dropped and why). This is your 354-tables
-  story in miniature: say so in the README.
+  a data quality report (rows in, rows dropped and why).
   Done when: quality_report.md is generated and tests pass.
 
 Step 3. Forge (forge/): features from config + commodity prices at quote date;
