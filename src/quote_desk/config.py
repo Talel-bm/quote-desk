@@ -20,6 +20,8 @@ ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = Path(os.getenv("QUOTEDESK_DATA_DIR", ROOT / "data" / "generated"))
 ERP_DB = DATA_DIR / "erp.sqlite"  # synthetic ERP, read-only after Foundation
 APP_DB = DATA_DIR / "app.sqlite"  # approval inbox, feedback, quote state
+FOUNDATION_DB = DATA_DIR / "foundation.sqlite"  # cleaned tables, datasets, audit, quarantine
+QUALITY_REPORT = DATA_DIR / "quality_report.md"  # human-readable Foundation report
 MODELS_DIR = DATA_DIR / "models"  # trained LightGBM / neighbors models
 
 # One seed for every random generator, so runs are reproducible.
