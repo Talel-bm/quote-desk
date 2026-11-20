@@ -66,6 +66,6 @@ def fetch() -> pd.DataFrame:
     raw = pd.read_excel(io.BytesIO(response.content), sheet_name="Monthly Prices", header=None)
     prices = select_window(parse_pink_sheet(raw), START_MONTH, END_MONTH)
     RAW_CSV.parent.mkdir(parents=True, exist_ok=True)
-    prices.to_csv(RAW_CSV, index=False)
+    prices.to_csv(RAW_CSV, index=False, lineterminator="\n")
     print(f"Wrote {len(prices)} months to {RAW_CSV.relative_to(config.ROOT)}")
     return prices
