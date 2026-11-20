@@ -5,6 +5,8 @@ def main() -> None:
     """Command-line entry point: `uv run quote-desk <command>`."""
     parser = argparse.ArgumentParser(prog="quote-desk")
     commands = parser.add_subparsers(dest="command", required=True)
+
+    # Generate
     commands.add_parser("fetch-commodities", help="download real metal prices (one-time)")
     gen = commands.add_parser("generate", help="build data/generated/erp.sqlite")
     chk = commands.add_parser("check-generator", help="eval: how learnable is the cost data")
@@ -13,10 +15,22 @@ def main() -> None:
             "--seed", type=int, default=None, help="random seed (default: config.SEED)"
         )
         sub.add_argument("--jobs", type=int, default=3000, help="number of historical quotes")
-    cln = commands.add_parser("clean", help="Foundation: profile, clean and report on the ERP")
-    cln.add_argument(
-        "--demo", action="store_true", help="clean the unrelated field-service sample instead"
+
+    # Foundation
+    source_help = "folder of CSVs, a .csv file, or a SQLite file"
+    prof = commands.add_parser("profile", help="profile any data source (no contract needed)")
+    prof.add_argument("--source", required=True, help=source_help)
+    prof.add_argument("--out", help="output folder (default: data/generated/<source name>)")
+    draft = commands.add_parser("draft-contract", help="guess a contract from the data")
+    draft.add_argument("--source", required=True, help=source_help)
+    draft.add_argument("--out", help="output .py file")
+    cln = commands.add_parser(
+        "clean", help="Foundation: clean and report (default: the Lakeshore ERP)"
     )
+    cln.add_argument("--source", help=source_help + " (default: the Lakeshore ERP)")
+    cln.add_argument("--contract", help="reviewed contract .py file (it is run as Python)")
+    cln.add_argument("--out", help="output folder")
+    cln.add_argument("--demo", action="store_true", help="clean the field-service sample")
     args = parser.parse_args()
 
     # Imports live inside each branch so a command only loads what it needs.
@@ -24,36 +38,27 @@ def main() -> None:
         from quote_desk.generate.fetch_commodities import fetch
 
         fetch()
-        return
+    elif args.command in ("generate", "check-generator"):
+        from quote_desk import config
 
-    from quote_desk import config
+        seed = config.SEED if args.seed is None else args.seed
+        if args.command == "generate":
+            from quote_desk.generate.synth_erp import generate
 
-    if args.command == "generate":
-        from quote_desk.generate.synth_erp import generate
-
-        generate(seed=config.SEED if args.seed is None else args.seed, n_jobs=args.jobs)
-    elif args.command == "check-generator":
-        from quote_desk.generate.learnability import check
-
-        check(seed=config.SEED if args.seed is None else args.seed, n_jobs=args.jobs)
-    elif args.command == "clean":
-        from quote_desk.foundation.load import load_csv_folder, load_sqlite
-        from quote_desk.foundation.quality_report import build_foundation
-
-        if args.demo:
-            from quote_desk.foundation.contracts.field_service_demo import CONTRACT
-
-            raw = load_csv_folder(config.ROOT / "data" / "samples" / "field_service")
-            db, report = (
-                config.DATA_DIR / "demo" / "foundation.sqlite",
-                config.DATA_DIR / "demo" / "quality_report.md",
-            )
+            generate(seed=seed, n_jobs=args.jobs)
         else:
-            from quote_desk.foundation.contracts.lakeshore_erp import CONTRACT
+            from quote_desk.generate.learnability import check
 
-            raw = load_sqlite(config.ERP_DB)
-            db, report = config.FOUNDATION_DB, config.QUALITY_REPORT
-        result = build_foundation(raw, CONTRACT, db, report)
-        print(f"Wrote {db}")
-        print(f"Wrote {report}")
-        print(f"Review queue: {len(result.review_queue)} cases")
+            check(seed=seed, n_jobs=args.jobs)
+    elif args.command == "profile":
+        from quote_desk.foundation.cli import profile_command
+
+        profile_command(args.source, args.out)
+    elif args.command == "draft-contract":
+        from quote_desk.foundation.cli import draft_command
+
+        draft_command(args.source, args.out)
+    elif args.command == "clean":
+        from quote_desk.foundation.cli import clean_command
+
+        clean_command(args.source, args.contract, args.out, args.demo)

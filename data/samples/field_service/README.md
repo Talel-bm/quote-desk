@@ -10,4 +10,10 @@ order, a work order pointing to an unknown technician, a non-numeric labor
 value, cancelled and open orders, missing parts costs, and one parts cost that
 is about 10x too high.
 
-Run it with `uv run quote-desk clean --demo`.
+Run it with `uv run quote-desk clean --demo` (reviewed contract), or treat it as
+brand-new data:
+
+```sh
+uv run quote-desk profile --source data/samples/field_service
+uv run quote-desk clean --source data/samples/field_service   # drafts a contract first
+```

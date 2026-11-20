@@ -26,6 +26,7 @@ Steps 0 (scaffold), 1 (generate) and 2 (foundation) done. Subpackages `generate/
 - Agreed policies: outliers are **flagged, not removed** (`is_outlier`, `outlier_z`, `outlier_group`); only extreme cases (≥5× typical) and orphan references go to `review_queue`; everything else is automatic and logged in `audit`; excluded rows go to `quarantine` with a reason and the raw row; **missing values are left for Forge**; output is identical on rerun.
 - Outputs in `data/generated/foundation.sqlite`: cleaned tables (same names), `cost_history` (what Forge trains on: won jobs + config + customer + outlier flags), `crosswalk`, `audit`, `quarantine`, `review_queue`. Forge should read from here, not from `erp.sqlite`, and map part numbers via the cleaned tables.
 - Report (`quality_report.md`): plain-language summary + safeguards table first, technical detail after.
+- New data flow (`foundation/cli.py`): profile → `draft_contract.py` guesses keys, types (tolerating ~5% bad values), and links (≥70% of values found), leaving TODOs for business rules → `load_contract_file()` executes a contract `.py` file (only load reviewed files). Outputs go to `data/generated/<source name>/`. On the ERP the draft recovers all hand-written keys and links.
 
 ## Git workflow
 
@@ -41,6 +42,9 @@ uv run quote-desk generate   # build data/generated/erp.sqlite (--seed, --jobs)
 uv run quote-desk check-generator     # eval: LightGBM MAPE on the clean synthetic data
 uv run quote-desk clean               # Foundation: foundation.sqlite + quality_report.md
 uv run quote-desk clean --demo        # same engine on the unrelated field-service sample
+uv run quote-desk profile --source PATH          # any new data: CSV folder, .csv or SQLite
+uv run quote-desk draft-contract --source PATH   # guessed contract (keys/types/links) to review
+uv run quote-desk clean --source PATH [--contract FILE]  # no --contract = auto draft + clean
 uv run quote-desk fetch-commodities   # one-time refresh of real metal prices (needs internet)
 uv run pytest                # run all tests
 uv run pytest path/to/test_file.py::test_name   # run a single test

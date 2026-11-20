@@ -247,3 +247,25 @@ def build_foundation(
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render(contract, raw, raw_profile, result), encoding="utf-8")
     return result
+
+
+def render_profile(source: str, raw_profile: dict) -> str:
+    """A Markdown profile of raw data: the questions to take to the customer."""
+    lines = [
+        f"# Data profile: `{source}`",
+        "",
+        "Generated from the data alone, before any contract. Use it to agree with the",
+        "business what identifies each row, how tables link, and which values mean what.",
+        "",
+        "## Tables",
+        "",
+        md_table(raw_profile["summary"]),
+        "",
+        "## Links discovered (share of a column's values found in another table's key)",
+        "",
+        md_table(raw_profile["relationships"]),
+        "",
+    ]
+    for table, columns in raw_profile["columns"].items():
+        lines += [f"## `{table}` columns", "", md_table(columns), ""]
+    return "\n".join(lines)
