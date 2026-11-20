@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Steps 0 (scaffold) and 1 (generate) done. Subpackages `generate/ foundation/ forge/ intake/ workforce/ api/` under `src/quote_desk/` match the build steps in `SPEC.md`. `README.md` is still empty. Update this file as real modules are added.
+Steps 0 (scaffold), 1 (generate) and 2 (foundation) done. Subpackages `generate/ foundation/ forge/ intake/ workforce/ api/` under `src/quote_desk/` match the build steps in `SPEC.md`. `README.md` is still empty. Update this file as real modules are added.
 
 ## Architecture notes
 
@@ -17,9 +17,15 @@ Steps 0 (scaffold) and 1 (generate) done. Subpackages `generate/ foundation/ for
 - Metal prices: copper/aluminum are **real** World Bank Pink Sheet data in the committed `data/raw/commodity_prices_worldbank.csv` (refresh with `quote-desk fetch-commodities`; provenance in `data/raw/README.md`). Electrical steel is **synthetic**, derived from real iron ore. History window is 2023-11 to 2026-10. Use `commodity.prices_on()` for any price lookup.
 - `cost_model.py` holds the hidden "true cost" rules: planned cost (materials ∝ kVA^0.75, learning curve, wage inflation) plus hidden drivers the ERP never records (supplier spread, per-customer extra work, monthly shop load, noisier rare options, rework, rare major overruns). It is generator-only: never write its formulas into the ERP or import it from `forge/`, since the model must learn cost from job history.
 - `synth_erp.build_erp(seed, n_jobs, messy=True)` builds clean tables, then `add_mess()` applies the deliberate mess (legacy duplicate part numbers, `quote`/`cancelled` rows in `jobs`, kg/lb mix in `boms`, ×10 unit-cost typos, ~3% blanks) using a separate RNG, so `messy=False` gives the identical clean data underneath.
-- **Foundation must not exploit generator internals** (e.g. the `L4xxxx` prefix or exact ×10 factors). Design agreed in principle: a generic cleaning engine + a per-source data contract stating business meaning; the clean `messy=False` tables are used only in tests to score cleaning. Details to be settled before Step 2.
 - Generator eval `quote-desk check-generator`: out-of-the-box LightGBM on clean won jobs should land at ~10-20% MAPE (currently ~10-13% across seeds), with a formula oracle (exact plan, no hidden factors) as reference. Re-run it after any change to `cost_model.py` or job generation.
 - Copper rises ~77% over the window, mostly in year 3, but the measured year-3 penalty for LightGBM is small (<1 MAPE point); still worth a material-cost-at-quote-date feature in Forge.
+
+### Foundation (`foundation/`)
+- **Generic engine + per-source contract.** `clean.py`, `profile.py`, `load.py`, `quality_report.py` contain no domain knowledge; all business meaning lives in `foundation/contracts/<source>.py` (keys, foreign keys, types, units, identity columns for duplicate merging, dataset filters, outlier comparison groups). A new source needs a new contract, not engine changes. `field_service_demo.py` + `data/samples/field_service/` prove this.
+- **Must not exploit generator internals** (e.g. the `L4xxxx` prefix or exact ×10 factors). Contracts state only what a customer could say. The clean `messy=False` tables are used only in `tests/test_foundation_eval.py` to score cleaning (all typos caught, real overruns not sent to review).
+- Agreed policies: outliers are **flagged, not removed** (`is_outlier`, `outlier_z`, `outlier_group`); only extreme cases (≥5× typical) and orphan references go to `review_queue`; everything else is automatic and logged in `audit`; excluded rows go to `quarantine` with a reason and the raw row; **missing values are left for Forge**; output is identical on rerun.
+- Outputs in `data/generated/foundation.sqlite`: cleaned tables (same names), `cost_history` (what Forge trains on: won jobs + config + customer + outlier flags), `crosswalk`, `audit`, `quarantine`, `review_queue`. Forge should read from here, not from `erp.sqlite`, and map part numbers via the cleaned tables.
+- Report (`quality_report.md`): plain-language summary + safeguards table first, technical detail after.
 
 ## Git workflow
 
@@ -33,6 +39,8 @@ Python 3.12, managed with **uv** (`uv_build` backend, `src/` layout, lockfile in
 uv sync                      # install deps + dev group (pytest, ruff)
 uv run quote-desk generate   # build data/generated/erp.sqlite (--seed, --jobs)
 uv run quote-desk check-generator     # eval: LightGBM MAPE on the clean synthetic data
+uv run quote-desk clean               # Foundation: foundation.sqlite + quality_report.md
+uv run quote-desk clean --demo        # same engine on the unrelated field-service sample
 uv run quote-desk fetch-commodities   # one-time refresh of real metal prices (needs internet)
 uv run pytest                # run all tests
 uv run pytest path/to/test_file.py::test_name   # run a single test
