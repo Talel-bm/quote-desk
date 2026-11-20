@@ -13,7 +13,13 @@ TABLES = {
 
 @pytest.fixture(scope="module")
 def erp():
-    """A small ERP (300 jobs) shared by the tests in this file."""
+    """A small clean ERP (300 jobs) shared by the tests in this file."""
+    return synth_erp.build_erp(seed=7, n_jobs=300, messy=False)
+
+
+@pytest.fixture(scope="module")
+def messy():
+    """The same ERP with the deliberate mess applied."""
     return synth_erp.build_erp(seed=7, n_jobs=300)
 
 
@@ -23,13 +29,13 @@ def test_all_tables_are_built(erp):
 
 
 def test_same_seed_gives_identical_tables(erp):
-    again = synth_erp.build_erp(seed=7, n_jobs=300)
+    again = synth_erp.build_erp(seed=7, n_jobs=300, messy=False)
     for name in TABLES:
         pd.testing.assert_frame_equal(erp[name], again[name])
 
 
 def test_different_seed_gives_different_jobs(erp):
-    other = synth_erp.build_erp(seed=8, n_jobs=300)
+    other = synth_erp.build_erp(seed=8, n_jobs=300, messy=False)
     assert not erp["jobs"].equals(other["jobs"])
 
 
@@ -73,3 +79,58 @@ def test_write_erp_creates_sqlite_with_all_tables(erp, tmp_path):
         n_jobs = conn.execute("select count(*) from jobs").fetchone()[0]
     assert names == TABLES
     assert n_jobs == len(erp["jobs"])
+
+
+# --- Deliberate mess ------------------------------------------------------------
+def test_messy_build_is_reproducible(messy):
+    again = synth_erp.build_erp(seed=7, n_jobs=300)
+    for name in TABLES:
+        pd.testing.assert_frame_equal(messy[name], again[name])
+
+
+def test_duplicate_parts_share_a_config(messy):
+    finished = messy["items"].query("item_type == 'finished'")
+    legacy = finished[finished["part_number"].str.startswith("L")]
+    assert len(legacy) > 0
+    config_cols = ["product_family", *synth_erp.TRANSFORMER_FIELDS, *synth_erp.ENCLOSURE_FIELDS]
+    dupes = finished[config_cols].astype(str).duplicated(keep=False)
+    assert dupes.sum() == 2 * len(legacy)
+    assert messy["jobs"]["part_number"].isin(legacy["part_number"]).any()
+
+
+def test_quotes_and_cancelled_jobs_are_mixed_in(messy):
+    status = messy["jobs"]["status"]
+    assert set(status) == {"won", "lost", "quote", "cancelled"}
+    quotes = messy["jobs"][status == "quote"]
+    assert quotes["actual_unit_cost"].isna().all()
+    assert quotes["job_id"].str.startswith("Q").all()
+
+
+def test_cancelled_jobs_have_partial_costs(erp, messy):
+    clean = erp["jobs"].set_index("job_id")
+    cancelled = messy["jobs"].query("status == 'cancelled'").set_index("job_id")
+    before = clean.loc[cancelled.index, "actual_material_cost"]
+    assert (cancelled["actual_material_cost"] < before).all()
+
+
+def test_some_unit_costs_are_off_by_ten(erp, messy):
+    clean = erp["jobs"].set_index("job_id")["actual_unit_cost"]
+    won = messy["jobs"].query("status == 'won'").set_index("job_id")["actual_unit_cost"]
+    ratio = (won / clean.loc[won.index]).dropna()
+    assert ((ratio > 9.9) | (ratio < 0.101)).any()
+
+
+def test_bom_units_mix_kg_and_lb(erp, messy):
+    assert set(messy["boms"]["uom"]) == {"kg", "lb", "ea"}
+    lb = messy["boms"].query("uom == 'lb'").dropna(subset=["qty"])
+    kg = erp["boms"].loc[lb.index, "qty"]
+    assert (lb["qty"] / kg).round(1).eq(2.2).all()
+
+
+def test_about_three_percent_values_missing(messy):
+    for table, columns in synth_erp.MISSING_COLUMNS.items():
+        for col in columns:
+            rate = messy[table][col].isna().mean()
+            if table == "jobs" and col == "actual_labor_cost":
+                continue  # already empty for lost jobs
+            assert 0.0 < rate < 0.12, f"{table}.{col}: {rate:.1%}"

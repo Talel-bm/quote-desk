@@ -415,9 +415,116 @@ def make_open_pos(rng, fake: Faker, components: pd.DataFrame, prices, n: int = 1
     return pd.DataFrame(rows)
 
 
+# --- Deliberate mess ------------------------------------------------------------
+# Real ERPs are messy. Each function below adds one kind of mess that
+# foundation/ must clean up. They return new tables and never edit in place.
+LB_PER_KG = 2.20462
+MISSING_COLUMNS = {
+    "jobs": ["requested_ship_date", "quoted_unit_price", "actual_labor_cost"],
+    "items": ["description"],
+    "customers": ["region", "payment_terms"],
+    "boms": ["qty"],
+}
+
+
+def add_duplicate_parts(items, jobs, rng, share=0.05):
+    """Give ~5% of finished items a second, legacy part number, and move some of
+    their jobs onto it, so the same product appears under two numbers."""
+    items, jobs = items.copy(), jobs.copy()
+    finished = items[items["item_type"] == "finished"]
+    picked = finished.sample(frac=share, random_state=rng)
+    legacy = picked.copy()
+    legacy["part_number"] = [f"L{40001 + i}" for i in range(len(legacy))]
+    legacy["description"] = legacy["description"].str.replace(" ", ",", n=2).str.lower()
+    for old, new in zip(picked["part_number"], legacy["part_number"], strict=True):
+        on_old = jobs.index[jobs["part_number"] == old]
+        moved = on_old[rng.random(len(on_old)) < 0.4]
+        jobs.loc[moved, "part_number"] = new
+    return pd.concat([items, legacy], ignore_index=True), jobs
+
+
+def add_quote_rows(jobs, rng, share=0.05):
+    """Copy the original quote record of ~5% of won jobs back into the jobs table,
+    the way quotes and orders end up mixed in one ERP table."""
+    won = jobs[jobs["status"] == "won"]
+    quotes = won.sample(frac=share, random_state=rng).copy()
+    quotes["job_id"] = "Q" + quotes["job_id"].str[1:]
+    quotes["status"] = "quote"
+    cost_cols = ["ship_date", "actual_material_cost", "actual_labor_cost", "actual_unit_cost"]
+    quotes[cost_cols] = None
+    quotes["notes"] = "quote - see order"
+    mixed = pd.concat([jobs, quotes], ignore_index=True)
+    return mixed.sort_values(["quote_date", "job_id"], kind="mergesort", ignore_index=True)
+
+
+def add_cancelled(jobs, rng, share=0.03):
+    """Mark ~3% of won jobs as cancelled, leaving the partial costs booked before
+    cancellation. Their unit cost looks cheap and would mislead a model."""
+    jobs = jobs.copy()
+    won = jobs.index[jobs["status"] == "won"]
+    picked = rng.choice(won, size=int(len(won) * share), replace=False)
+    material = jobs.loc[picked, "actual_material_cost"] * rng.uniform(0.2, 0.6, len(picked))
+    labor = jobs.loc[picked, "actual_labor_cost"] * rng.uniform(0.0, 0.3, len(picked))
+    jobs.loc[picked, "status"] = "cancelled"
+    jobs.loc[picked, "actual_material_cost"] = material.round(2)
+    jobs.loc[picked, "actual_labor_cost"] = labor.round(2)
+    unit = (material + labor * (1 + cm.OVERHEAD_RATE)) / jobs.loc[picked, "quantity"]
+    jobs.loc[picked, "actual_unit_cost"] = unit.round(2)
+    jobs.loc[picked, "notes"] = "cancelled by customer"
+    return jobs
+
+
+def add_outliers(jobs, rng, share=0.005):
+    """Typo-style errors on ~0.5% of won jobs: unit cost off by a factor of 10."""
+    jobs = jobs.copy()
+    won = jobs.index[jobs["status"] == "won"]
+    picked = rng.choice(won, size=max(1, int(len(won) * share)), replace=False)
+    factor = rng.choice([10.0, 0.1], size=len(picked))
+    jobs.loc[picked, "actual_unit_cost"] = (jobs.loc[picked, "actual_unit_cost"] * factor).round(2)
+    return jobs
+
+
+def mix_units(boms, rng, share=0.3):
+    """Record ~30% of kg BOM lines in pounds instead."""
+    boms = boms.copy()
+    kg_rows = boms.index[boms["uom"] == "kg"]
+    picked = kg_rows[rng.random(len(kg_rows)) < share]
+    boms.loc[picked, "qty"] = (boms.loc[picked, "qty"] * LB_PER_KG).round(2)
+    boms.loc[picked, "uom"] = "lb"
+    return boms
+
+
+def add_missing(table, columns, rng, share=0.03):
+    """Blank out ~3% of the values in the given columns."""
+    table = table.copy()
+    for col in columns:
+        blank = rng.random(len(table)) < share
+        table[col] = table[col].astype(object).where(~blank, None)
+    return table
+
+
+def add_mess(tables: dict[str, pd.DataFrame], rng) -> dict[str, pd.DataFrame]:
+    """Apply all deliberate mess to clean tables."""
+    t = dict(tables)
+    t["items"], t["jobs"] = add_duplicate_parts(t["items"], t["jobs"], rng)
+    t["jobs"] = add_quote_rows(t["jobs"], rng)
+    t["jobs"] = add_cancelled(t["jobs"], rng)
+    t["jobs"] = add_outliers(t["jobs"], rng)
+    t["boms"] = mix_units(t["boms"], rng)
+    for name, columns in MISSING_COLUMNS.items():
+        t[name] = add_missing(t[name], columns, rng)
+    return t
+
+
 # --- Assemble and save --------------------------------------------------------
-def build_erp(seed: int = config.SEED, n_jobs: int = 3000) -> dict[str, pd.DataFrame]:
-    """Build every ERP table in memory. Same seed -> identical tables."""
+def build_erp(
+    seed: int = config.SEED, n_jobs: int = 3000, messy: bool = True
+) -> dict[str, pd.DataFrame]:
+    """Build every ERP table in memory. Same seed -> identical tables.
+
+    The mess uses its own random stream, so the clean data underneath is the
+    same whether `messy` is True or False.
+    """
     rng = np.random.default_rng(seed)
     fake = Faker("en_US")
     fake.seed_instance(seed)
@@ -428,7 +535,7 @@ def build_erp(seed: int = config.SEED, n_jobs: int = 3000) -> dict[str, pd.DataF
     components = make_components()
     jobs = make_jobs(rng, customers, catalog, prices, n_jobs)
 
-    return {
+    tables = {
         "customers": customers.drop(columns=["_volume", "_p_transformer"]),
         "items": pd.concat([catalog, components], ignore_index=True),
         "boms": make_boms(catalog),
@@ -439,6 +546,9 @@ def build_erp(seed: int = config.SEED, n_jobs: int = 3000) -> dict[str, pd.DataF
         "inventory": make_inventory(rng, components),
         "open_pos": make_open_pos(rng, fake, components, prices),
     }
+    if messy:
+        tables = add_mess(tables, np.random.default_rng([seed, 1]))
+    return tables
 
 
 def write_erp(tables: dict[str, pd.DataFrame], path: Path) -> Path:
