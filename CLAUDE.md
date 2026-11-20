@@ -4,13 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Step 0 (scaffold) done: empty subpackages `generate/ foundation/ forge/ intake/ workforce/ api/` under `src/quote_desk/` match the build steps in `SPEC.md`. `README.md` is still empty. Update this file as real modules are added.
+Steps 0 (scaffold) and 1 (generate) done. Subpackages `generate/ foundation/ forge/ intake/ workforce/ api/` under `src/quote_desk/` match the build steps in `SPEC.md`. `README.md` is still empty. Update this file as real modules are added.
 
 ## Architecture notes
 
 - `src/quote_desk/config.py` is the single source of paths, `SEED`, and LLM settings (`LLM_PROVIDER`, Gemini/Ollama model names, read from `.env`; see `.env.example`). Don't rebuild paths or read env vars elsewhere.
 - Two SQLite databases in `DATA_DIR` (`data/generated/`, overridable with `QUOTEDESK_DATA_DIR`): `erp.sqlite` is the synthetic ERP, rebuilt by `generate/` and treated as read-only after Foundation; `app.sqlite` holds app state (approval inbox, feedback, quotes) so regenerating the ERP never wipes it.
 - Tests use the `tmp_data_dir` fixture in `tests/conftest.py` to redirect `DATA_DIR` to a temp folder.
+- CLI subcommands live in `src/quote_desk/__init__.py` (argparse, lazy imports per command). Add new steps there (e.g. `clean`, `train`).
+
+### Generate (`generate/`)
+- Metal prices: copper/aluminum are **real** World Bank Pink Sheet data in the committed `data/raw/commodity_prices_worldbank.csv` (refresh with `quote-desk fetch-commodities`; provenance in `data/raw/README.md`). Electrical steel is **synthetic**, derived from real iron ore. History window is 2023-11 to 2026-10. Use `commodity.prices_on()` for any price lookup.
+- `cost_model.py` holds the hidden "true cost" rules (materials ∝ kVA^0.75, learning curve, rework). It is generator-only: never write its formulas into the ERP or import it from `forge/`, since the model must learn cost from job history.
+- `synth_erp.build_erp(seed, n_jobs, messy=True)` builds clean tables, then `add_mess()` applies the deliberate mess (legacy duplicate part numbers `L4xxxx`, `quote`/`cancelled` rows in `jobs`, kg/lb mix in `boms`, ×10 unit-cost typos, ~3% blanks) using a separate RNG, so `messy=False` gives the identical clean data underneath. Tests compare the two row by row; Foundation should undo exactly this list.
+- Copper rises ~77% over the window, mostly in year 3: Forge's backtest (train years 1-2, test year 3) needs a material-cost-at-quote-date feature because LightGBM cannot extrapolate past the training price range.
 
 ## Git workflow
 
@@ -22,7 +29,8 @@ Python 3.12, managed with **uv** (`uv_build` backend, `src/` layout, lockfile in
 
 ```sh
 uv sync                      # install deps + dev group (pytest, ruff)
-uv run quote-desk            # run the CLI entry point (quote_desk:main)
+uv run quote-desk generate   # build data/generated/erp.sqlite (--seed, --jobs)
+uv run quote-desk fetch-commodities   # one-time refresh of real metal prices (needs internet)
 uv run pytest                # run all tests
 uv run pytest path/to/test_file.py::test_name   # run a single test
 uv run ruff check .          # lint
