@@ -93,6 +93,9 @@ def make_customers(rng: np.random.Generator, fake: Faker, n: int = 60) -> pd.Dat
                 # Hidden helpers for job generation, dropped before saving.
                 "_volume": rng.lognormal(0, 1),
                 "_p_transformer": SEGMENT_TRANSFORMER_SHARE[segment],
+                # Some customers always need extra work (special labels, witnessed
+                # tests, paperwork). Nobody records it; it only shows in their costs.
+                "_labor_factor": rng.lognormal(0, 0.10),
             }
         )
     return pd.DataFrame(rows)
@@ -270,7 +273,8 @@ def estimator_quote(cfg, qty, quote_date, segment, prices, rng) -> tuple[float, 
     bit noisy (about 8%), so quotes lag in a rising copper market.
     """
     est_date = max(quote_date - pd.Timedelta(days=30), HISTORY_START)
-    est_cost = cm.expected_unit_cost(cfg, qty, commodity.prices_on(prices, est_date))["total"]
+    est_prices = commodity.prices_on(prices, est_date)
+    est_cost = cm.expected_unit_cost(cfg, qty, est_prices, years_since_start(quote_date))["total"]
     est_cost *= rng.lognormal(0, 0.08)
     margin = SEGMENT_MARGIN[segment] + rng.normal(0, 0.03)
     return round(est_cost * (1 + margin), 2), round(est_cost, 2)
@@ -285,7 +289,25 @@ def win_probability(quoted_price: float, true_cost: float) -> float:
     return 1 / (1 + np.exp(0.2 + 12 * (quoted_price / market - 1)))
 
 
-def make_jobs(rng, customers, catalog, prices, n_jobs: int) -> pd.DataFrame:
+def years_since_start(date) -> float:
+    """Years between the start of the history and `date` (drives wage inflation)."""
+    return (pd.Timestamp(date) - HISTORY_START).days / 365.25
+
+
+def make_shop_load(rng, months: pd.Series) -> dict[str, float]:
+    """How busy the factory is each month (1.0 = normal, 1.2 = 20% over capacity).
+
+    Busy and quiet spells last a few months: each month keeps 75% of last
+    month's deviation and adds some randomness. Not stored in the ERP.
+    """
+    load, deviation = {}, 0.0
+    for month in months:
+        deviation = 0.75 * deviation + rng.normal(0, 0.08)
+        load[month] = 1.0 + deviation
+    return load
+
+
+def make_jobs(rng, customers, catalog, prices, shop_load, n_jobs: int) -> pd.DataFrame:
     """Three years of quotes: config, quantity, price, won/lost, and actual costs if won."""
     span_days = (HISTORY_END - HISTORY_START).days
     quote_dates = sorted(
@@ -307,7 +329,8 @@ def make_jobs(rng, customers, catalog, prices, n_jobs: int) -> pd.DataFrame:
         qty = pick_quantity(rng, family)
 
         prices_now = commodity.prices_on(prices, quote_date)
-        true_cost = cm.expected_unit_cost(cfg, qty, prices_now)["total"]
+        years = years_since_start(quote_date)
+        true_cost = cm.expected_unit_cost(cfg, qty, prices_now, years)["total"]
         quoted, _ = estimator_quote(cfg, qty, quote_date, cust["segment"], prices, rng)
         won = rng.random() < win_probability(quoted, true_cost)
 
@@ -327,13 +350,23 @@ def make_jobs(rng, customers, catalog, prices, n_jobs: int) -> pd.DataFrame:
             "notes": None,
         }
         if won:
-            actual = cm.actual_unit_cost(cfg, qty, prices_now, rng)
+            actual = cm.actual_unit_cost(
+                cfg,
+                qty,
+                prices_now,
+                rng,
+                years=years,
+                shop_load=shop_load[quote_date.strftime("%Y-%m")],
+                customer_factor=cust["_labor_factor"],
+            )
             row["ship_date"] = iso(quote_date + pd.Timedelta(days=int(rng.integers(30, 91))))
             row["actual_material_cost"] = round(actual["material"] * qty, 2)
             row["actual_labor_cost"] = round(actual["labor"] * qty, 2)
             row["actual_unit_cost"] = round(actual["total"], 2)
-            if actual["rework"] and rng.random() < 0.7:
-                row["notes"] = "coil rework - retested OK"
+            if actual["overrun"]:
+                row["notes"] = "major problem - parts scrapped and rebuilt"
+            elif actual["rework"] and rng.random() < 0.7:
+                row["notes"] = "rework after failed test - retested OK"
         if row["notes"] is None and rng.random() < 0.15:
             row["notes"] = str(rng.choice(ROUTINE_NOTES))
         rows.append(row)
@@ -533,10 +566,11 @@ def build_erp(
     customers = make_customers(rng, fake)
     catalog = make_catalog(rng)
     components = make_components()
-    jobs = make_jobs(rng, customers, catalog, prices, n_jobs)
+    shop_load = make_shop_load(rng, prices["month"])
+    jobs = make_jobs(rng, customers, catalog, prices, shop_load, n_jobs)
 
     tables = {
-        "customers": customers.drop(columns=["_volume", "_p_transformer"]),
+        "customers": customers.drop(columns=["_volume", "_p_transformer", "_labor_factor"]),
         "items": pd.concat([catalog, components], ignore_index=True),
         "boms": make_boms(catalog),
         "routings": make_routings(catalog),

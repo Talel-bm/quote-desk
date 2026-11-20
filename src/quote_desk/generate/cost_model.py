@@ -15,13 +15,23 @@ A config is a plain dict, e.g.
 import numpy as np
 
 # --- Factory constants -------------------------------------------------------
-LABOR_RATE = 55.0  # US$ per labor hour
+LABOR_RATE = 55.0  # US$ per labor hour at the start of the history (Nov 2023)
+WAGE_INFLATION = 0.04  # labor rate rises 4% per year
 OVERHEAD_RATE = 0.35  # overhead as a share of labor cost
 SCRAP_FACTOR = 1.04  # 4% extra material lost to offcuts and scrap
 SHEET_STEEL_RATIO = 0.42  # plain sheet steel costs ~42% of electrical steel per kg
 LEARNING_EXPONENT = -0.15  # labor per unit falls as quantity rises: qty ** -0.15
-REWORK_RATE = 0.05  # share of jobs that need rework
 STEEL_DENSITY = 7850  # kg per cubic meter
+
+# --- What makes actual cost differ from the plan (hidden from the ERP) --------
+SUPPLIER_SPREAD = 0.06  # material bought ~6% above/below the index, job to job
+LABOR_NOISE = 0.07  # normal job-to-job labor variation
+UNUSUAL_OPTION_NOISE = 0.06  # extra labor variation per rarely built option
+OVERTIME_SENSITIVITY = 0.8  # busy month at 110% load -> labor +8%
+REWORK_RATE = 0.05  # share of jobs that fail test and are partly redone
+REWORK_RANGE = (1.2, 1.4)  # rework multiplies labor by this much
+OVERRUN_RATE = 0.02  # share of jobs with a major problem (e.g. coil scrapped)
+OVERRUN_RANGE = (1.5, 2.0)  # a major problem multiplies the whole cost
 
 GAUGE_MM = {16: 1.52, 14: 1.90, 12: 2.66}  # sheet thickness by steel gauge
 
@@ -141,10 +151,18 @@ def material_cost(cfg: dict, prices: dict[str, float]) -> float:
     return metal * SCRAP_FACTOR + finish_extra + HARDWARE_KITS[hardware_kit(cfg)]
 
 
-def expected_unit_cost(cfg: dict, qty: int, prices: dict[str, float]) -> dict[str, float]:
-    """Cost per unit with no surprises: materials + labor + overhead."""
+def labor_rate(years: float) -> float:
+    """Labor rate ($/h) `years` after the start of the history, with wage inflation."""
+    return LABOR_RATE * (1 + WAGE_INFLATION) ** years
+
+
+def expected_unit_cost(
+    cfg: dict, qty: int, prices: dict[str, float], years: float = 0.0
+) -> dict[str, float]:
+    """The planned cost per unit, as an estimator would compute it: materials +
+    labor + overhead, with no surprises."""
     material = material_cost(cfg, prices)
-    labor = labor_hours(cfg, qty) * LABOR_RATE
+    labor = labor_hours(cfg, qty) * labor_rate(years)
     overhead = labor * OVERHEAD_RATE
     return {
         "material": material,
@@ -154,14 +172,48 @@ def expected_unit_cost(cfg: dict, qty: int, prices: dict[str, float]) -> dict[st
     }
 
 
+def unusual_options(cfg: dict) -> int:
+    """How many rarely built options a config has. Rare work is less predictable."""
+    if cfg["product_family"] == "transformer":
+        return sum(
+            [cfg["k_factor"] == 13, cfg["primary_v"] == 4160, cfg["efficiency"] == "premium"]
+        )
+    return sum([cfg["nema_rating"] == "NEMA 4", cfg["gauge"] == 12, cfg["finish"] == "galvanized"])
+
+
 def actual_unit_cost(
-    cfg: dict, qty: int, prices: dict[str, float], rng: np.random.Generator
-) -> dict[str, float]:
-    """What a job really cost per unit: expected cost plus noise and occasional rework."""
-    cost = expected_unit_cost(cfg, qty, prices)
+    cfg: dict,
+    qty: int,
+    prices: dict[str, float],
+    rng: np.random.Generator,
+    years: float = 0.0,
+    shop_load: float = 1.0,
+    customer_factor: float = 1.0,
+) -> dict:
+    """What a job really cost per unit. Starts from the plan, then adds what the
+    ERP never records:
+
+    - supplier prices that differ from the index (material noise),
+    - customer-specific extra work (`customer_factor`, fixed per customer),
+    - overtime and rushing when the shop is busy (`shop_load` above 1.0),
+    - normal labor variation, larger for rarely built options,
+    - occasional rework, and rare major overruns.
+    """
+    cost = expected_unit_cost(cfg, qty, prices, years)
+    material = cost["material"] * rng.lognormal(0, SUPPLIER_SPREAD)
+
+    overtime = 1 + OVERTIME_SENSITIVITY * max(0.0, shop_load - 1)
+    sigma = LABOR_NOISE + UNUSUAL_OPTION_NOISE * unusual_options(cfg)
+    labor = cost["labor"] * customer_factor * overtime * rng.lognormal(0, sigma)
+
     rework = rng.random() < REWORK_RATE
-    material = cost["material"] * rng.lognormal(0, 0.03)
-    labor = cost["labor"] * rng.lognormal(0, 0.06) * (rng.uniform(1.2, 1.4) if rework else 1.0)
+    if rework:
+        labor *= rng.uniform(*REWORK_RANGE)
+    overrun = rng.random() < OVERRUN_RATE
+    if overrun:
+        factor = rng.uniform(*OVERRUN_RANGE)
+        material, labor = material * factor, labor * factor
+
     overhead = labor * OVERHEAD_RATE
     return {
         "material": material,
@@ -169,4 +221,5 @@ def actual_unit_cost(
         "overhead": overhead,
         "total": material + labor + overhead,
         "rework": rework,
+        "overrun": overrun,
     }
