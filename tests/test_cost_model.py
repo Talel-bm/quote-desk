@@ -78,5 +78,49 @@ def test_enclosure_cost_grows_with_size_and_gauge():
 
 def test_actual_cost_is_close_to_expected_on_average():
     rng = np.random.default_rng(0)
-    actual = [cm.actual_unit_cost(transformer(), 1, PRICES, rng)["total"] for _ in range(2000)]
-    assert np.mean(actual) == pytest.approx(total(transformer()), rel=0.03)
+    actual = [cm.actual_unit_cost(transformer(), 1, PRICES, rng)["total"] for _ in range(4000)]
+    # Rework and rare overruns push the average a little above the plan.
+    assert np.mean(actual) == pytest.approx(total(transformer()), rel=0.05)
+    assert np.mean(actual) > total(transformer())
+
+
+def sample_totals(cfg, n=2000, seed=0, **conditions):
+    rng = np.random.default_rng(seed)
+    return np.array(
+        [cm.actual_unit_cost(cfg, 1, PRICES, rng, **conditions)["total"] for _ in range(n)]
+    )
+
+
+def test_wage_inflation_raises_labor_over_time():
+    later = cm.expected_unit_cost(transformer(), 1, PRICES, years=2.0)
+    now = cm.expected_unit_cost(transformer(), 1, PRICES, years=0.0)
+    assert later["labor"] == pytest.approx(now["labor"] * 1.04**2)
+    assert later["material"] == now["material"]
+
+
+def test_busy_shop_and_demanding_customer_cost_more():
+    base = sample_totals(transformer()).mean()
+    assert sample_totals(transformer(), shop_load=1.2).mean() > base
+    assert sample_totals(transformer(), customer_factor=1.2).mean() > base
+    # A quiet shop does not make jobs cheaper (no negative overtime).
+    assert sample_totals(transformer(), shop_load=0.8).mean() == pytest.approx(base)
+
+
+def test_unusual_options_make_cost_less_predictable():
+    usual = transformer()
+    rare = transformer(k_factor=13, primary_v=4160, efficiency="premium")
+    assert cm.unusual_options(usual) == 0
+    assert cm.unusual_options(rare) == 3
+
+    def spread(cfg):
+        totals = sample_totals(cfg)
+        return np.std(np.log(totals))
+
+    assert spread(rare) > spread(usual)
+
+
+def test_actual_cost_flags_rework_and_overruns_at_expected_rates():
+    rng = np.random.default_rng(1)
+    runs = [cm.actual_unit_cost(transformer(), 1, PRICES, rng) for _ in range(5000)]
+    assert np.mean([r["rework"] for r in runs]) == pytest.approx(cm.REWORK_RATE, abs=0.01)
+    assert np.mean([r["overrun"] for r in runs]) == pytest.approx(cm.OVERRUN_RATE, abs=0.01)
