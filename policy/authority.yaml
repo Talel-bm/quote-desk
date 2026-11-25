@@ -1,0 +1,53 @@
+# Authority policy (ADR 14): who may do what, and when. Reviewed like code.
+# Default deny: an action is allowed only if a permit rule matches and no forbid rule does.
+# Every rule cites the section of docs/policy/pricing_authority_memo.md it implements.
+version: "v1"
+source_doc: docs/policy/pricing_authority_memo.md
+
+pricing:
+  validity_days: 30
+  default_margin: 0.24
+  target_margin:            # memo 4.1
+    utility: 0.22
+    contractor: 0.25
+    oem: 0.20
+    distributor: 0.18
+
+rules:
+  - id: R-SEND-HUMAN
+    effect: permit
+    principal: {kind: human, roles_in: [estimator, senior]}
+    action: quote.approve_send
+    reason: estimators and seniors may approve sending a quote
+    source: "1.2"
+
+  - id: R-NO-AGENT-SEND
+    effect: forbid
+    principal: {kind: agent}
+    action: quote.approve_send
+    reason: software agents never approve a send
+    source: "1.1"
+
+  - id: R-LOW-MARGIN
+    effect: forbid
+    principal: {kind: human, roles_not_in: [senior]}
+    action: quote.approve_send
+    when: [{field: margin, op: "<", value: 0.18}]
+    reason: margin below 18% needs a senior estimator
+    source: "2.1"
+
+  - id: R-BIG-VALUE
+    effect: forbid
+    principal: {kind: human, roles_not_in: [senior]}
+    action: quote.approve_send
+    when: [{field: total, op: ">", value: 250000}]
+    reason: quote above $250,000 needs a senior estimator
+    source: "2.2"
+
+  - id: R-WARNING
+    effect: forbid
+    principal: {kind: human}
+    action: quote.approve_send
+    when: [{field: flag_count, op: ">", value: 0}]
+    reason: message has an unresolved warning; handle outside the quote desk
+    source: "3.1"
