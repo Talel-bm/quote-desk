@@ -17,11 +17,12 @@ dependencies = [
     "ollama>=0.6.3",
     "pandas>=3.1.1",
     "pydantic>=2.14.4",
+    "pydantic-settings>=2.16.3",
     "pypdf>=7.1.1",
     "python-dotenv>=1.2.4",
+    "pyyaml>=6.0.4",
     "scikit-learn>=1.9.1",
     "shap>=0.54.1",
-    "streamlit>=1.67.0",
     "uvicorn>=0.54.0",
 ]
 
@@ -34,16 +35,71 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.170.17",
+    "import-linter>=2.17",
+    "mypy>=2.4.1",
     "openpyxl>=3.1.5",
     "pytest>=9.2.0",
+    "pytest-cov>=7.1.0",
     "ruff>=0.17.6",
+    "types-pyyaml>=6.0.12.20261122",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["live: calls a real LLM or network service; never run in CI"]
 
 [tool.ruff]
 line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.coverage.run]
+source = ["quote_desk"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src/quote_desk"]
+mypy_path = "src"
+ignore_missing_imports = true
+# Strict where code is pure and new; pandas-heavy legacy modules start in default mode.
+check_untyped_defs = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["quote_desk.core.*", "quote_desk.storage.*", "quote_desk.workforce.*", "quote_desk.services.*"]
+disallow_untyped_defs = true
+
+# Architecture rules (docs/architecture.md section 3), checked in CI by `lint-imports`.
+[tool.importlinter]
+root_package = "quote_desk"
+
+[[tool.importlinter.contracts]]
+name = "Layers: higher layers may import lower ones, never the reverse"
+type = "layers"
+layers = [
+    "quote_desk.api",
+    "quote_desk.services",
+    "quote_desk.workforce | quote_desk.intake | quote_desk.forge",
+    "quote_desk.foundation",
+    "quote_desk.connectors | quote_desk.products | quote_desk.storage",
+    "quote_desk.core",
+]
+
+[[tool.importlinter.contracts]]
+name = "The product never imports the world simulator or the evals (no peeking at truth)"
+type = "forbidden"
+source_modules = [
+    "quote_desk.api",
+    "quote_desk.services",
+    "quote_desk.workforce",
+    "quote_desk.intake",
+    "quote_desk.forge",
+    "quote_desk.foundation",
+    "quote_desk.connectors",
+    "quote_desk.products",
+    "quote_desk.storage",
+    "quote_desk.core",
+]
+forbidden_modules = ["quote_desk.generate", "quote_desk.evals"]

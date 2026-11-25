@@ -14,6 +14,7 @@ Principles:
 
 import json
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -192,6 +193,7 @@ def merge_duplicates(tables: dict, spec: Table, log: Log) -> pd.DataFrame:
     leave the table; the crosswalk maps them to their master.
     """
     ident, (key_col,) = spec.identity, spec.primary_key
+    assert ident is not None, "merge_duplicates is only called for tables with identity"
     df = tables[spec.name]
     signature = joined_text(df[ident.columns])
     has_identity = df[ident.columns].notna().any(axis=1)
@@ -378,10 +380,11 @@ def run(raw: dict[str, pd.DataFrame], contract: Contract) -> Result:
     """Apply a contract to raw tables and return cleaned data plus full logs."""
     contract.validate()
     log = Log()
-    tables, stats = (
-        {},
-        {"tables": {}, "uncontracted": sorted(set(raw) - {t.name for t in contract.tables})},
-    )
+    tables: dict[str, pd.DataFrame] = {}
+    stats: dict[str, Any] = {
+        "tables": {},
+        "uncontracted": sorted(set(raw) - {t.name for t in contract.tables}),
+    }
 
     for spec in contract.tables:
         df = raw[spec.name].copy()
