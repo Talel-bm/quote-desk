@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Steps 0 (scaffold), 1 (generate) and 2 (foundation) done. Subpackages `generate/ foundation/ forge/ intake/ workforce/ api/` under `src/quote_desk/` match the build steps in `SPEC.md`. `README.md` is still empty. Update this file as real modules are added.
+Steps 0 (scaffold), 1 (generate) and 2 (foundation) done under SPEC v1. `SPEC.md` is now **v2** (two-plant group, five families, milestones M0-M9); the interview cut is M0-M4 by 2026-12-01. Design: `docs/architecture.md` (layers, dependency rules, data stores, threat model) and ADRs in `docs/adr/`. Target packages (`core/ connectors/ products/ storage/ services/ evals/`) are added as milestones need them. `README.md` is still empty. Update this file as real modules are added.
+
+Private, git-ignored: `SPEC.private.md` (original v1 spec), `research.private/` (seven research reports + `00_mapping.md`). Never commit or quote them in tracked files.
 
 ## Architecture notes
 
