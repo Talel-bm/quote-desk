@@ -4,7 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Steps 0 (scaffold), 1 (generate) and 2 (foundation) done under SPEC v1. `SPEC.md` is now **v2** (two-plant group, five families, milestones M0-M9); the interview cut is M0-M4 by 2026-12-01. Design: `docs/architecture.md` (layers, dependency rules, data stores, threat model) and ADRs in `docs/adr/`. Target packages (`core/ connectors/ products/ storage/ services/ evals/`) are added as milestones need them. `README.md` is still empty. Update this file as real modules are added.
+Steps 0 (scaffold), 1 (generate) and 2 (foundation v1) are done. **`SPEC.md` v3 is the source of truth**: a two-plant group (North + acquired Québec), five families, a day-by-day world simulator with a sealed answer key, and build Steps 3-10 (one per day, 2026-11-25 to 2026-12-01; interview 2026-12-02). Design: `docs/architecture.md` (layers, dependency rules, stores, runtime, testing, threat model) and ADRs 0001-0016 in `docs/adr/`. Target packages (`core/ connectors/ products/ storage/ services/ evals/`, `web/`) are added as steps need them. `README.md` is still empty. Update this file as real modules are added.
+
+## How each step is run (owner-approved; adapted from the owner's CoverageCheck project)
+
+1. Read SPEC.md's section for the step. Survey the REAL data first with small scratch scripts, so the plan rests on evidence.
+2. Show a short plan with the decisions that need the owner (recommend one option); wait for approval.
+3. Code in small pure functions with docstrings that say why. Review outputs on real data by hand.
+4. Tests: unit tests per rule; real-data tests; hand-checked cases as EXACT sets; a "never again" test for every bug found; then a mutation check (break each rule in memory via a scratch script, restore in `finally`, confirm some test fails; add a test for any survivor).
+5. **One** independent audit agent per step: read-only, scratch outside the repo, briefed with the owner's decisions so it does not re-argue them. Verify every audit claim on real data before acting; show the owner a fix / record-for-later / reject table.
+6. Update the step's status in SPEC.md (decisions, measured numbers, known limits), explain each new function in plain language, commit.
+
+Evidence rules (ADR 0016): pass criteria go in `evals/preregistration.yaml` BEFORE a measured run and are applied as written; tune on dev sets only; the sealed world and intake held-out set are opened once after the freeze tag; every reported number is a `Metric` with CI, n and a Measured / Derived / Projected label; UI and README numbers come only from generated files with freshness tests. UI pages: show ASCII options first; the owner looks at each page before commit.
 
 Private, git-ignored: `SPEC.private.md` (original v1 spec), `research.private/` (seven research reports + `00_mapping.md`). Never commit or quote them in tracked files.
 
@@ -62,8 +73,8 @@ uv add <pkg> / uv add --dev <pkg>   # add dependencies (keeps uv.lock in sync)
 
 ## Declared stack
 
-Dependencies in `pyproject.toml` indicate the intended building blocks, though none are wired up yet:
-- API/UI: FastAPI + uvicorn, Streamlit
+Dependencies in `pyproject.toml` indicate the intended building blocks (full target list in SPEC.md section 8; new ones are approved by the owner and added with `uv add` when a step needs them):
+- API/UI: FastAPI + uvicorn (native SSE) serving a React app in `web/` (Vite, TypeScript, Tailwind, shadcn/ui, Recharts). Streamlit is being removed (ADR 0010).
 - LLM clients: `google-genai` (Gemini) and `ollama` (local models)
 - ML: LightGBM, scikit-learn, SHAP (explainability), pandas/numpy
 - Inputs/fixtures: `pypdf` (PDF parsing), `faker` (synthetic data), `httpx`

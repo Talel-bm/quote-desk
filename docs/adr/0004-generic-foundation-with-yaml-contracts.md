@@ -1,6 +1,6 @@
 # 4. Generic Foundation engine with per-source YAML contracts
 
-Status: Accepted (2026-11-24). Supersedes the Python-file contracts of step 2 once M6 lands.
+Status: Accepted (2026-11-24). Supersedes the Python-file contracts of step 2 once Step 5 lands.
 
 ## Context
 Step 2 built a generic cleaning engine driven by per-source contracts written as
@@ -16,4 +16,4 @@ stay in code and are referenced by name. Loading a contract never executes code.
 
 ## Consequences
 Contracts are safe to load, easy to diff, and can be exported to the standard. The
-existing Python contracts are converted once (M6); until then both load paths exist.
+existing Python contracts are converted once (Step 5); until then both load paths exist.

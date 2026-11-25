@@ -9,8 +9,9 @@ without rules a monolith slowly becomes tangled.
 
 ## Decision
 One package, layered as in `docs/architecture.md`. `import-linter` enforces: higher
-layers import lower ones only; `intake` and `forge` are independent; no product
-package imports `quote_desk.generate`. Protocols (ports) only at real seams
+layers import lower ones only; `workforce`, `intake` and `forge` are independent
+(agents return commands that `services` executes); no product package imports
+`quote_desk.generate` or `quote_desk.evals`. Protocols (ports) only at real seams
 (LLM, source readers, clock, mailer), each with a fake.
 
 ## Consequences
